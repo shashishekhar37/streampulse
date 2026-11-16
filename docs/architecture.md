@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TB
     subgraph SIM["📺 Streaming Platform Simulator"]
-        V["2,000 Viewers\n(hidden personas)"]
+        V["1,000 Viewers\n(hidden personas)"]
         T["400 Titles\n(Zipf popularity)"]
         D["Daily Traffic Pattern\n+ Evening Congestion"]
         I["Injected CDN Incidents\n+ Concept Drift"]
@@ -46,7 +46,7 @@ flowchart TB
         end
 
         subgraph T2["Task 2: Throughput Forecasting"]
-            F1["Online Regression\n(lag features + EWMA)"]
+            F1["Residual Online Regression\n(predicts change from\nsession mean; Huber loss)"]
             F2["Baselines:\npersistence & EWMA"]
         end
 
@@ -58,6 +58,8 @@ flowchart TB
 
         subgraph T4["Task 4: Recommendations"]
             R1["Matrix Factorization\n(BPR optimization)"]
+            R4["Content-Based\n(genre affinity × popularity)"]
+            R5["Hybrid\n(content + MF)"]
             R2["Baselines:\npopularity & random"]
             R3["Cold Start Handling"]
         end
@@ -71,6 +73,7 @@ flowchart TB
 
     subgraph OUTPUTS["📊 Outputs & Monitoring"]
         REG["Model Registry\n(versioned models + metrics)"]
+        API["REST API\n(serve.py)"]
         DASH["Dashboard\n(dashboard.png)"]
         METRICS["Hourly Metrics\n(hourly_metrics.csv)"]
         ALERTS["Anomaly Alerts\n(alerts.json)"]
@@ -81,10 +84,12 @@ flowchart TB
     FS --> T2
     FS --> T3
     MB --> T4
-    MB --> T5
+    FS --> T5
 
     T1 -->|models + metrics| REG
     T2 -->|models + metrics| REG
+    T4 -->|model + metrics| REG
+    REG -->|LATEST version| API
     T3 --> ALERTS
     T1 --> METRICS
     T2 --> METRICS
@@ -96,7 +101,7 @@ flowchart TB
     T3 --> SUMMARY
     T4 --> SUMMARY
     T5 --> SUMMARY
-    DD -->|drift detected| A1
+    DD -.->|drift alert| A1
     DL -->|resolved labels| A1
 ```
 
@@ -137,7 +142,8 @@ mindmap
     Concept Drift
       Page-Hinkley test
       PSI monitoring
-      Auto-retrain on drift
+      Alert on drift
+      Optional learning-rate boost
       Network conditions change
     Unsupervised Detection
       No labels for anomalies
@@ -148,6 +154,7 @@ mindmap
       No star ratings
       Play = positive signal
       BPR matrix factorization
+      Content-based + hybrid
       Watch duration = weight
     Data Quality
       Event validation
@@ -171,7 +178,7 @@ flowchart TB
     subgraph SCORING["Three Parallel Scorers"]
         ON["Online Model\n(logistic regression,\ncontinuously updated)"]
         FR["Frozen Model\n(trained on first 12h,\nnever updated)"]
-        HE["Heuristic\n(stall_time / 15 + 0.3*gap)"]
+        HE["Heuristic\n(stall seconds / 15\n+ 0.3 × stalled recently)"]
     end
 
     PB["Pending Buffer\n(tick, features,\n3 predictions)"]
@@ -182,10 +189,10 @@ flowchart TB
         L2["Still watching\nafter 60s → label 0"]
     end
 
-    EV["Evaluate\n(PR-AUC, ROC-AUC,\nlog-loss)"]
+    EV["Evaluate\n(PR-AUC, ROC-AUC, Brier;\nmean log-loss per window)"]
     LR["Learn\n(partial_fit)"]
     DR["Drift Detected?\n(Page-Hinkley)"]
-    RT["Rebuild on\nrecent 8000 samples"]
+    RT["Raise drift alert\n(optional: learn faster\nfor 2 h, off by default)"]
 
     HB --> FS
     FS --> ON & FR & HE
@@ -195,7 +202,7 @@ flowchart TB
     DL --> EV --> LR --> ON
     LR --> FR
     EV --> DR
-    DR -->|yes| RT --> ON
+    DR -->|yes| RT -.->|optional boost| ON
 ```
 
 ---
@@ -238,14 +245,16 @@ flowchart TB
 | Component | Technology |
 |-----------|-----------|
 | Language | Python 3.10+ |
-| ML Models | NumPy (from scratch), Scikit-learn |
-| Online Learning | Custom `partial_fit` implementations |
+| ML Models | Scikit-learn, NumPy |
+| Online Learning | Scikit-learn `partial_fit` (SGDClassifier, SGDRegressor, StandardScaler, MiniBatchKMeans) in small wrappers |
 | Anomaly Detection | Z-score (custom) + Isolation Forest (sklearn) |
 | Clustering | MiniBatch K-Means (sklearn) |
-| Recommendations | Matrix Factorization with BPR (custom) |
+| Recommendations | Matrix Factorization with BPR (NumPy), content-based, hybrid |
 | Drift Detection | Page-Hinkley test, PSI (custom) |
 | Data | Pandas, NumPy |
-| Visualization | Matplotlib/Seaborn |
+| Visualization | Matplotlib |
+| Serving | Python standard library `http.server` |
+| Testing | `unittest` |
 
 ---
 
@@ -254,7 +263,7 @@ flowchart TB
 1. **True online learning** — Models update incrementally via `partial_fit`, no batch retraining pipelines
 2. **Prequential evaluation** — Evaluate-then-learn pattern mirrors real production, not train/test split
 3. **Delayed label handling** — 60-second label delay with pending buffer reflects real-world feedback loops
-4. **Concept drift adaptation** — Automatic drift detection and model rebuild when data distribution shifts
+4. **Concept drift monitoring** — Page-Hinkley on the model's loss raises an alert; continuous learning adapts the model (a measured experiment showed an extra learning-rate boost lowered PR-AUC, so it is off by default)
 5. **Multiple baselines** — Every task compared against simple baselines (frozen model, persistence, popularity, heuristic)
 6. **Unsupervised + supervised** — Mix of labeled (abandonment, forecasting) and unlabeled (anomaly, segmentation) tasks
 7. **Production data quality** — Event validation, dead-letter queue, malformed event handling

@@ -4,6 +4,7 @@ import json
 import numpy as np
 from streampulse.simulator import StreamingPlatformSimulator
 from streampulse.ingest import QueueSource, MicroBatcher, DeadLetterQueue
+from streampulse.config import GENRES
 from streampulse.feature_store import FeatureStore
 
 sim = StreamingPlatformSimulator(hours=0.5, traffic=1.0, seed=7)
@@ -82,9 +83,12 @@ for vid in fs3.viewers:
         print("=== Viewer Segmentation Profile (1 viewer) ===")
         print(f"Viewer ID: {vid}")
         print(f"Profile vector: {np.round(vp, 4)}")
-        seg_features = ["genre_" + g for g in ["sports", "news", "kids", "drama", "action", "documentary", "comedy", "reality"]]
+        # Same order as FeatureStore.viewer_profile(): genre shares (config.GENRES order),
+        # time-of-day shares, then log1p(avg minutes watched), completion, abandonment, live share.
+        seg_features = ["genre_" + g for g in GENRES]
         seg_features += ["night", "morning", "afternoon", "evening"]
-        seg_features += ["log_watch_s", "completion_rate", "abandon_rate"]
+        seg_features += ["log_avg_watch_min", "completion_rate", "abandon_rate", "live_share"]
+        assert len(seg_features) == len(vp)
         print(f"Feature names: {seg_features}")
         print()
         break
